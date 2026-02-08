@@ -95,7 +95,7 @@ def play(start_pts, pts_in_hand, ruleset, deposit, riichi_status, goal_placement
             )
             raise ValueError(error_message)
 
-    honba_input = input("请输入本场数: ")
+    honba_input = input("请输入本场数 (默认为0): ")
     honba = int(honba_input) if honba_input else 0
 
     oya_tsumo, ko_tsumo, oya_ron, ko_ron = generate_all_possible_points(
@@ -204,7 +204,7 @@ if __name__ == "__main__":
     rules = RULES[ruleset_name]
     start_pts = [-5.0, -27.0, -22.8, 54.8]
     other_players_pts = []
-    pts_in_hand = [45000, 25500, 43300, 6200]
+    pts_in_hand = [43500, 24000, 43300, 9200]
     tiebreaker = None
     deposit = 0
     riichi_status = [0, 0, 0, 0]
