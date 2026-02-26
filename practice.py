@@ -12,6 +12,29 @@ from rulesets import RULES
 import calculation
 
 
+def _generate_unbounded_geom():
+    """Generates a random integer k >= 0 with probability proportional to 1/(2^k)."""
+    k = 0
+    # The probability of returning k is (1/2)^(k+1), which is proportional to 1/(2^k).
+    # This gives the desired "halving probability" for each increment.
+    while random.random() < 0.5:
+        k += 1
+    return k
+
+
+def _generate_geom_with_max(max_val):
+    """
+    Generates a random integer k in [0, max_val] with probability proportional to 1/(2^k).
+    This is done by rejection sampling on the unbounded generator.
+    """
+    if max_val < 0:
+        return 0 # Should not happen, but safeguard
+    while True:
+        k = _generate_unbounded_geom()
+        if k <= max_val:
+            return k
+
+
 def _get_high_fu_cheat_sheet(player_to_ask, oya, question_type, rules):
     """Generates a cheat sheet for high-fu points (70, 90, 110)."""
     is_oya = player_to_ask == oya
@@ -140,11 +163,17 @@ def parse_answer_to_pts(answer_str, all_possible_pts):
         except (ValueError, IndexError):
             continue  # Ignore malformed comparisons
 
-        # 处理范围 ～
-        if '～' in part:
+        # 处理范围 ~
+        if '~' in part:
             try:
-                start_val, end_val = map(int, part.split('～'))
-                final_pts.update({p for p in all_possible_pts if start_val <= p <= end_val})
+                start_val, end_val = map(int, part.split('~'))
+                min_possible_pt = min(all_possible_pts) if all_possible_pts else 0
+
+                # 如果范围的起始点是理论最小点数，则等同于 <=
+                if start_val == min_possible_pt:
+                    final_pts.update({p for p in all_possible_pts if p <= end_val})
+                else:
+                    final_pts.update({p for p in all_possible_pts if start_val <= p <= end_val})
             except ValueError:
                 continue  # 忽略格式错误的范围
         # 处理单个数字
@@ -161,7 +190,7 @@ def parse_answer_to_pts(answer_str, all_possible_pts):
     return final_pts
 
 
-def generate_random_scenario():
+def generate_random_scenario(forced_q_type=None):
     """生成一个随机的对局情景和问题"""
 
     # 1. 随机选择规则 (排除 "CUS")
@@ -203,8 +232,14 @@ def generate_random_scenario():
 
     # 3. 随机生成本场、场供等参数
     oya = 3
-    honba = random.randint(0, 4)
-    deposit = random.randint(0, 4) if honba != 0 else 0
+    # 根据概率减半的无上限分布生成本场和场供，并满足 deposit <= honba * 4 的约束
+
+    # 1. 先生成本场数 (honba)
+    honba = _generate_unbounded_geom()
+    max_deposit = honba * 4
+
+    # 2. 再根据约束生成有效的立直棒数 (deposit)
+    deposit = _generate_geom_with_max(max_deposit)
     riichi_status = [0] * 4
 
     # 4. 根据场供生成局内点数
@@ -223,7 +258,7 @@ def generate_random_scenario():
     current_sum = sum(pts_in_hand)
     diff = total_points_in_hands - current_sum
 
-    # 将偏差加到随机一个玩家身上
+    # 将偏差加到随机一个选手身上
     pts_in_hand[random.randint(0, 3)] += diff
 
     # 5. 智能生成问题
@@ -245,14 +280,14 @@ def generate_random_scenario():
     current_total_pts = [round(u + v, 1) for u, v in zip(start_pts, current_game_pts)] + other_players_pts
     current_rank = final_ranking(current_total_pts, tiebreaker)
 
-    # 选择一个非第一名的玩家进行提问
+    # 选择一个非第一名的选手进行提问
     eligible_players = [i for i, rank in enumerate(current_rank) if rank > 1]
     if not eligible_players:  # 如果所有人都并列第一，则随机选一个
         eligible_players = list(range(4))
     player_to_ask = random.choice(eligible_players)
     player_rank = current_rank[player_to_ask]
 
-    # 根据玩家当前排名设定一个有挑战性的目标
+    # 根据选手当前排名设定一个有挑战性的目标
     if player_rank == 2:
         goal_placement = 1
     elif player_rank == 3:
@@ -261,12 +296,23 @@ def generate_random_scenario():
         goal_placement = random.choice([2, 3])
 
     # 随机选择问题类型 (自摸或荣和)
-    possible_question_types = ["tsumo"]
-    for i in range(4):
-        if i != player_to_ask:
-            possible_question_types.append(f"ron_{i}")
-
-    question_type = random.choice(possible_question_types)
+    if forced_q_type:
+        if forced_q_type == 'tsumo':
+            question_type = 'tsumo'
+        else:  # ron
+            possible_ron_targets = [p for p in range(4) if p != player_to_ask]
+            if not possible_ron_targets:  # Should not happen in a 4-player game
+                question_type = 'tsumo'  # fallback
+            else:
+                target_player = random.choice(possible_ron_targets)
+                question_type = f"ron_{target_player}"
+    else:
+        # Fallback to original logic if no type is forced
+        possible_question_types = ["tsumo"]
+        for i in range(4):
+            if i != player_to_ask:
+                possible_question_types.append(f"ron_{i}")
+        question_type = random.choice(possible_question_types)
 
     return {
         "ruleset_name": ruleset_name,
@@ -281,15 +327,63 @@ def generate_random_scenario():
         "goal_placement": goal_placement,
         "question_type": question_type,
         "other_players_pts": other_players_pts,
-        "tiebreaker": tiebreaker
+        "tiebreaker": tiebreaker,
+        "current_total_pts": current_total_pts
     }
 
 
-def start_quiz():
+def start_quiz(min_or_count=0):
     """开始一个练习会话"""
 
     # --- 1. 场景生成 ---
-    scenario = generate_random_scenario()
+    q_type_choice = random.choice(['tsumo', 'ron'])
+
+    if min_or_count > 0:
+        if min_or_count == 1:
+            mode_name = "困难"
+        else:
+            mode_name = f"魔鬼"
+        print(f"正在生成{mode_name}问题，请稍候...")
+        while True:
+            scenario = generate_random_scenario(forced_q_type=q_type_choice)
+            # --- Check if the scenario is "hard" by calculating the answer ---
+            temp_rules = scenario["rules"]
+            temp_all_pts = scenario["start_pts"] + scenario["other_players_pts"]
+            temp_tiebreaker = scenario["tiebreaker"]
+
+            oya_tsumo, ko_tsumo, oya_ron, ko_ron = generate_all_possible_points(
+                kiriage_mangan=temp_rules.get("kiriage_mangan", True),
+                allow_double_yakuman=temp_rules.get("allow_double_yakuman", True),
+                allow_composite_yakuman=temp_rules.get("allow_composite_yakuman", True)
+            )
+
+            q_type = scenario["question_type"]
+            player = scenario["player_to_ask"]
+            goal = scenario["goal_placement"]
+
+            pts_list = []
+            ok_end, ok_continue = [], []
+
+            if q_type == "tsumo":
+                pts_list = oya_tsumo if player == scenario["oya"] else ko_tsumo
+                ok_end, ok_continue = calculation.calculate_tsumo_conditions(
+                    player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"], scenario["deposit"],
+                    scenario["riichi_status"], temp_all_pts, goal, temp_tiebreaker, temp_rules, pts_list)
+
+            elif q_type.startswith("ron_"):
+                target_player = int(q_type.split('_')[1])
+                pts_list = oya_ron if player == scenario["oya"] else ko_ron
+                ok_end, ok_continue = calculation.calculate_ron_conditions(
+                    player, target_player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"],
+                    scenario["deposit"], scenario["riichi_status"], temp_all_pts, goal, temp_tiebreaker, temp_rules, pts_list)
+
+            merged_ok_pts = sorted(list(set(ok_end) | set(ok_continue)))
+            merged_correct_str = format_as_intervals(merged_ok_pts, pts_list)
+
+            if merged_correct_str.count("或") >= min_or_count:
+                break  # Found a suitable scenario
+    else:
+        scenario = generate_random_scenario(forced_q_type=q_type_choice)
     rules = scenario["rules"]
     all_pts = scenario["start_pts"] + scenario["other_players_pts"]
     tiebreaker = scenario["tiebreaker"]
@@ -298,12 +392,24 @@ def start_quiz():
     WIND_MAP = {0: "东", 1: "南", 2: "西", 3: "北"}
     oya_wind = WIND_MAP[scenario["oya"]]
 
-    print("--- 麻将终局条件计算练习 ---")
+    print("\n--- 麻将终局条件计算练习 ---")
     print(f"规则: {rules['name']}")
     print(f"顺位马: {rules['placement_pts']}")
     print(f"赛前积分: {scenario['start_pts']}")
-    print(f"当前局内点数: {scenario['pts_in_hand']}")
-    print(f"庄家: 玩家 {scenario['oya']} ({oya_wind})")
+    
+    # 计算并显示局内点差
+    player_to_ask_idx = scenario['player_to_ask']
+    pts_in_hand = scenario['pts_in_hand']
+    player_to_ask_score = pts_in_hand[player_to_ask_idx]
+    point_diffs = [p - player_to_ask_score for p in pts_in_hand]
+    
+    print(f"局内点数: {pts_in_hand}")
+    print(f"局内点差: {point_diffs} (相对选手 {player_to_ask_idx})")
+
+    # 显示当前总分
+    print(f"当前总分: {scenario['current_total_pts']}")
+
+    print(f"庄家: 选手 {scenario['oya']} ({oya_wind})")
     print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}")
     print("-" * 30)
 
@@ -330,7 +436,7 @@ def start_quiz():
 
     player_wind = WIND_MAP[player]
     if q_type == "tsumo":
-        question_str = f"问题: 玩家 {player} ({player_wind}) 为获得前 {goal} 名，其自摸条件是什么？"
+        question_str = f"问题: 选手 {player} ({player_wind}) 为获得前 {goal} 名，其自摸条件是什么？"
         pts_list = oya_tsumo if player == scenario["oya"] else ko_tsumo
         ok_end, ok_continue = calculation.calculate_tsumo_conditions(
             player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"], scenario["deposit"],
@@ -339,7 +445,7 @@ def start_quiz():
     elif q_type.startswith("ron_"):
         target_player = int(q_type.split('_')[1])
         target_wind = WIND_MAP[target_player]
-        question_str = f"问题: 玩家 {player} ({player_wind}) 为获得前 {goal} 名，其荣和玩家 {target_player} ({target_wind}) 的条件是什么？"
+        question_str = f"问题: 选手 {player} ({player_wind}) 为获得前 {goal} 名，其荣和选手 {target_player} ({target_wind}) 的条件是什么？"
         pts_list = oya_ron if player == scenario["oya"] else ko_ron
         ok_end, ok_continue = calculation.calculate_ron_conditions(
             player, target_player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"],
@@ -384,11 +490,12 @@ def start_quiz():
     print(question_str)
     print("(提示: 请按程序输出的格式作答。若答案为'〇'，可直接回车。)")
     print("(不连续条件请使用 逗号(,)、分号(;) 或 or 分隔，例如: <=2000, >=12000)")
+    print("(点数闭区间请使用 波浪线(~) 分隔，例如: 3400~3900, >=24000)")
     student_answer = input("你的答案: ")
 
     # --- 5. 评判并给出反馈 ---
-    print("-" * 30)
-    print(f"正确答案是: {correct_answer_str}")
+    print("-" * 30, flush=True)
+    print(f"正确答案是: {correct_answer_str}", flush=True)
 
     # 将正确答案和学生答案都解析为点数集合进行比较
     correct_pts_set = parse_answer_to_pts(merged_correct_str, pts_list)
@@ -415,178 +522,26 @@ def start_quiz():
         is_correct = True
 
     if is_correct:
-        print("\n恭喜你，完全正确！你已经掌握了！")
+        print("\n恭喜你，完全正确！你已经掌握了！", flush=True)
     else:
-        print("\n答案不完全正确，请对照正确答案，检查你的计算过程。")
-
-
-def start_hard_quiz():
-    """开始一个“真剣勝負”练习会话，专门寻找难题。"""
-    print("\n--- 真剣勝負模式 ---")
-    print("正在生成题目，请稍候...")
-
-    found_scenario = False
-    scenario_data = {}
-
-    while not found_scenario:
-        # 1. 场景生成
-        scenario = generate_random_scenario()
-        rules = scenario["rules"]
-        all_pts = scenario["start_pts"] + scenario["other_players_pts"]
-        tiebreaker = scenario["tiebreaker"]
-
-        # 2. 计算答案，检查是否为不连续条件
-        oya_tsumo, ko_tsumo, oya_ron, ko_ron = generate_all_possible_points(
-            kiriage_mangan=rules.get("kiriage_mangan", True),
-            allow_double_yakuman=rules.get("allow_double_yakuman", True),
-            allow_composite_yakuman=rules.get("allow_composite_yakuman", True)
-        )
-
-        q_type = scenario["question_type"]
-        player = scenario["player_to_ask"]
-        goal = scenario["goal_placement"]
-        ok_end, ok_continue, pts_list = [], [], []
-
-        if q_type == "tsumo":
-            pts_list = oya_tsumo if player == scenario["oya"] else ko_tsumo
-            ok_end, ok_continue = calculation.calculate_tsumo_conditions(
-                player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"], scenario["deposit"],
-                scenario["riichi_status"], all_pts, goal, tiebreaker, rules, pts_list)
-        elif q_type.startswith("ron_"):
-            target_player = int(q_type.split('_')[1])
-            pts_list = oya_ron if player == scenario["oya"] else ko_ron
-            ok_end, ok_continue = calculation.calculate_ron_conditions(
-                player, target_player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"],
-                scenario["deposit"], scenario["riichi_status"], all_pts, goal, tiebreaker, rules, pts_list)
-
-        merged_ok_pts = sorted(list(set(ok_end) | set(ok_continue)))
-        formatted_merged_str = format_as_intervals(merged_ok_pts, pts_list)
-
-        # 检查条件是否是不连续的 (包含 "或" 字)
-        if "或" in formatted_merged_str:
-            found_scenario = True
-            scenario_data = {
-                "scenario": scenario,
-                "ok_end": ok_end,
-                "ok_continue": ok_continue,
-                "pts_list": pts_list
-            }
-
-    # --- 3. 提取找到的场景和答案 ---
-    scenario = scenario_data["scenario"]
-    rules = scenario["rules"]
-    ok_end = scenario_data["ok_end"]
-    ok_continue = scenario_data["ok_continue"]
-    pts_list = scenario_data["pts_list"]
-    player = scenario["player_to_ask"]
-    goal = scenario["goal_placement"]
-    q_type = scenario["question_type"]
-
-    # --- 4. 打印场景和问题 ---
-    WIND_MAP = {0: "东", 1: "南", 2: "西", 3: "北"}
-    oya_wind = WIND_MAP[scenario["oya"]]
-
-    print("--- 麻将终局条件计算练习 ---")
-    print(f"规则: {rules['name']}")
-    print(f"顺位马: {rules['placement_pts']}")
-    print(f"赛前积分: {scenario['start_pts']}")
-    print(f"当前局内点数: {scenario['pts_in_hand']}")
-    print(f"庄家: 玩家 {scenario['oya']} ({oya_wind})")
-    print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}")
-    print("-" * 30)
-
-    cheat_sheet = _get_high_fu_cheat_sheet(
-        scenario["player_to_ask"], scenario["oya"], scenario["question_type"], rules
-    )
-    print(cheat_sheet)
-    print("")
-
-    # 构造问题字符串
-    player_wind = WIND_MAP[player]
-    question_str = ""
-    if q_type == "tsumo":
-        question_str = f"问题: 玩家 {player} ({player_wind}) 为获得前 {goal} 名，其自摸条件是什么？"
-    elif q_type.startswith("ron_"):
-        target_player = int(q_type.split('_')[1])
-        target_wind = WIND_MAP[target_player]
-        question_str = f"问题: 玩家 {player} ({player_wind}) 为获得前 {goal} 名，其荣和玩家 {target_player} ({target_wind}) 的条件是什么？"
-
-    # --- 5. 格式化正确答案 ---
-    end_str = format_as_intervals(ok_end, pts_list)
-    continue_str = format_as_intervals(ok_continue, pts_list)
-    merged_correct_str = format_as_intervals(sorted(list(set(ok_end) | set(ok_continue))), pts_list)
-
-    is_tsumo = scenario["question_type"] == "tsumo"
-    is_oya = scenario["player_to_ask"] == scenario["oya"]
-    if is_tsumo and is_oya:
-        if end_str and end_str not in ["〇", "✕"]: end_str += " all"
-        if continue_str and continue_str not in ["〇", "✕"]: continue_str += " all"
-        if merged_correct_str and merged_correct_str not in ["〇", "✕"]: merged_correct_str += " all"
-
-    is_end_valid = end_str and end_str != '✕'
-    is_continue_valid = continue_str and continue_str != '✕'
-    if not is_end_valid and not is_continue_valid:
-        correct_answer_str = "✕"
-    elif is_end_valid and not is_continue_valid:
-        correct_answer_str = end_str
-    elif not is_end_valid and is_continue_valid:
-        correct_answer_str = f"{continue_str} (续行)"
-    else:
-        correct_answer_str = f"{end_str} (终局) / {continue_str} (续行)"
-
-    # --- 6. 向学生提问并获取答案 ---
-    print(question_str)
-    print("(提示: 请按程序输出的格式作答。若答案为'〇'，可直接回车。)")
-    print("(不连续条件请使用 逗号(,)、分号(;) 或 or 分隔，例如: <=2000, >=12000)")
-    print("(点数闭区间请使用 波浪线(～) 分隔，例如: 3400～3900, >=24000)")
-    student_answer = input("你的答案: ")
-
-    # --- 7. 评判并给出反馈 ---
-    print("-" * 30)
-    print(f"正确答案是: {correct_answer_str}")
-
-    # 将正确答案和学生答案都解析为点数集合进行比较
-    correct_pts_set = parse_answer_to_pts(merged_correct_str, pts_list)
-    student_pts_set = parse_answer_to_pts(student_answer, pts_list)
-
-    # 特殊情况处理：〇 和 ✕
-    student_input_norm = student_answer.strip().lower().replace(" ", "")
-    ok_aliases = ['all', '0', 'o', 'ok', '〇', '']
-    no_aliases = ['none', 'x', 'no', '✕']
-
-    is_student_ok = student_input_norm in ok_aliases
-    is_correct_ok = (merged_correct_str == "〇")
-
-    is_student_no = student_input_norm in no_aliases
-    is_correct_no = (merged_correct_str == "✕")
-
-    is_correct = False
-    if is_student_ok and is_correct_ok:
-        is_correct = True
-    elif is_student_no and is_correct_no:
-        is_correct = True
-    # For non-special cases, compare the parsed point sets
-    elif not is_correct_ok and not is_correct_no and correct_pts_set == student_pts_set:
-        is_correct = True
-
-    if is_correct:
-        print("\n恭喜你，完全正确！你已经掌握了！")
-    else:
-        print("\n答案不完全正确，请对照正确答案，检查你的计算过程。")
+        print("\n答案不完全正确，请对照正确答案，检查你的计算过程。", flush=True)
 
 
 if __name__ == "__main__":
     while True:
         print("\n请选择练习模式:")
         print("1. 普通模式 (随机生成问题)")
-        print("2. 真剣勝負模式 (专门寻找难题)")
+        print("2. 困难模式 (至少一个'或')")
+        print("3. 魔鬼模式 (至少两个'或')")
         print("q. 退出")
         choice = input("请输入选项: ").strip()
 
         if choice == '1':
-            start_quiz()
+            start_quiz(min_or_count=0)
         elif choice == '2':
-            start_hard_quiz()
+            start_quiz(min_or_count=1)
+        elif choice == '3':
+            start_quiz(min_or_count=2)
         elif choice.lower() == 'q':
             break
         else:

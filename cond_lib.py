@@ -298,14 +298,14 @@ def format_as_intervals(ok_pts, all_pts):
         is_last_block = (end_pt == all_pts[-1])
 
         # 根据是否为边界来决定格式
-        if is_first_block:
+        if is_first_block and start_pt != end_pt:
             intervals.append(f'<= {end_pt}')
-        elif is_last_block:
+        elif is_last_block and start_pt != end_pt:
             intervals.append(f'>= {start_pt}')
         elif start_pt == end_pt:
             intervals.append(f"== {start_pt}")
         else:
-            intervals.append(f'{start_pt} ～ {end_pt}')
+            intervals.append(f'{start_pt} ~ {end_pt}')
 
         i = j + 1
 
