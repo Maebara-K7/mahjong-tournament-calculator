@@ -12,6 +12,56 @@ from rulesets import RULES
 import calculation
 
 
+def _get_high_fu_cheat_sheet(player_to_ask, oya, question_type, rules):
+    """Generates a cheat sheet for high-fu points (70, 90, 110)."""
+    is_oya = player_to_ask == oya
+    is_tsumo = question_type == "tsumo"
+
+    fu_to_display = [70, 90, 110]
+    han_to_display = [1, 2]
+
+    type_str = ("亲家" if is_oya else "子家") + ("自摸" if is_tsumo else "荣和")
+    header = f"--- 高符数点数速查表 ({type_str}) ---"
+
+    table_lines = [header]
+    col_headers = ["符数"] + [f"{h}番" for h in han_to_display]
+    table_lines.append("{:<5} | {:<9} | {:<9}".format(*col_headers))
+    table_lines.append("-" * (len(table_lines[1]) + 2))
+
+    for fu in fu_to_display:
+        row_data = [f"{fu}符"]
+        for han in han_to_display:
+            # 不存在 1 番 110 符自摸
+            if is_tsumo and han == 1 and fu == 110:
+                row_data.append("--")
+                continue
+
+            if is_tsumo:
+                if is_oya:
+                    # 亲家自摸
+                    pts = ceil_to_hundred(2 * fu * 2 ** (han + 2))
+                    row_data.append(f"{pts} all")
+                else:
+                    # 子家自摸
+                    ko_pts = ceil_to_hundred(fu * 2 ** (han + 2))
+                    oya_pts = ceil_to_hundred(2 * fu * 2 ** (han + 2))
+                    row_data.append(f"{ko_pts}/{oya_pts}")
+            else:
+                if is_oya:
+                    # 亲家荣和
+                    pts = ceil_to_hundred(6 * fu * 2 ** (han + 2))
+                    row_data.append(str(pts))
+                else:
+                    # 子家荣和
+                    pts = ceil_to_hundred(4 * fu * 2 ** (han + 2))
+                    row_data.append(str(pts))
+
+        table_lines.append("{:<5} | {:<9} | {:<9}".format(*row_data))
+
+    table_lines.append("-" * (len(table_lines[1]) + 2))
+    return "\n".join(table_lines)
+
+
 def generate_random_scenario():
     """生成一个随机的对局情景和问题"""
 
@@ -21,31 +71,61 @@ def generate_random_scenario():
     rules = available_rules[ruleset_name]
 
     # 2. 随机生成赛前积分
-    start_pts = [round(random.uniform(-60.0, 60.0), 1) for _ in range(4)]
+    # 通过模拟1-2场比赛来生成更真实的、与规则相关的赛前积分
+    start_pts = [0.0] * 4
+    num_games_to_simulate = random.randint(1, 2)
 
-    # 3. 随机生成局内点数 (使用更均匀的算法)
-    total_points = rules["starting_pts"] * 4
+    for _ in range(num_games_to_simulate):
+        # 为模拟的比赛生成随机的局内点数
+        total_points_sim = rules["starting_pts"] * 4
+        weights_sim = [random.random() for _ in range(4)]
+        total_weight_sim = sum(weights_sim)
+        unrounded_pts_sim = [(w / total_weight_sim) * total_points_sim for w in weights_sim]
+        simulated_pts_in_hand = [round(p / 100) * 100 for p in unrounded_pts_sim]
+        current_sum_sim = sum(simulated_pts_in_hand)
+        diff_sim = total_points_sim - current_sum_sim
+        simulated_pts_in_hand[random.randint(0, 3)] += diff_sim
+
+        # 使用 game_pts 计算该场模拟比赛的得分
+        game_scores = game_pts(
+            simulated_pts_in_hand,
+            rules["placement_pts"],
+            rules["starting_pts"],
+            tie_resolution=rules.get("tie_resolution", "split_points"),
+            deposit_final_draw_recipient=rules.get("deposit_final_draw_recipient", "first_place")
+        )
+
+        # 累积得分
+        for i in range(4):
+            start_pts[i] += game_scores[i]
+
+    # 将最终分数四舍五入到一位小数
+    start_pts = [round(p, 1) for p in start_pts]
+
+    # 3. 随机生成本场、场供等参数
+    oya = 3
+    honba = random.randint(0, 4)
+    deposit = random.randint(0, 4) if honba != 0 else 0
+    riichi_status = [0] * 4
+
+    # 4. 根据场供生成局内点数
+    # 总点数需要减去场供的点数
+    total_points_in_hands = rules["starting_pts"] * 4 - (deposit * 1000)
 
     # 生成四个随机权重
     weights = [random.random() for _ in range(4)]
     total_weight = sum(weights)
 
     # 根据权重分配点数
-    unrounded_pts = [(w / total_weight) * total_points for w in weights]
+    unrounded_pts = [(w / total_weight) * total_points_in_hands for w in weights]
 
     # 四舍五入到100的倍数，并处理总和偏差
     pts_in_hand = [round(p / 100) * 100 for p in unrounded_pts]
     current_sum = sum(pts_in_hand)
-    diff = total_points - current_sum
+    diff = total_points_in_hands - current_sum
 
     # 将偏差加到随机一个玩家身上
     pts_in_hand[random.randint(0, 3)] += diff
-
-    # 4. 随机生成其他参数
-    oya = 3
-    honba = random.randint(0, 4)
-    deposit = random.randint(0, 4) if honba != 0 else 0
-    riichi_status = [0] * 4
 
     # 5. 智能生成问题
     # 预计算当前排名以提出更有意义的问题
@@ -116,13 +196,24 @@ def start_quiz():
     tiebreaker = scenario["tiebreaker"]
 
     # --- 2. 打印场景和问题 ---
+    WIND_MAP = {0: "东", 1: "南", 2: "西", 3: "北"}
+    oya_wind = WIND_MAP[scenario["oya"]]
+
     print("--- 麻将终局条件计算练习 ---")
     print(f"规则: {rules['name']}")
+    print(f"顺位马: {rules['placement_pts']}")
     print(f"赛前积分: {scenario['start_pts']}")
     print(f"当前局内点数: {scenario['pts_in_hand']}")
-    print(f"庄家: 玩家 {scenario['oya']}")
-    print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}, 立直棒: {sum(scenario['riichi_status'])}")
+    print(f"庄家: 玩家 {scenario['oya']} ({oya_wind})")
+    print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}")
     print("-" * 30)
+
+    # 提问之前给出速查表
+    cheat_sheet = _get_high_fu_cheat_sheet(
+        scenario["player_to_ask"], scenario["oya"], scenario["question_type"], rules
+    )
+    print(cheat_sheet)
+    print("")
 
     # --- 3. 计算正确答案 ---
     oya_tsumo, ko_tsumo, oya_ron, ko_ron = generate_all_possible_points(
@@ -138,8 +229,9 @@ def start_quiz():
     player = scenario["player_to_ask"]
     goal = scenario["goal_placement"]
 
+    player_wind = WIND_MAP[player]
     if q_type == "tsumo":
-        question_str = f"问题: 玩家 {player} 为获得前 {goal} 名，其自摸条件是什么？"
+        question_str = f"问题: 玩家 {player} ({player_wind}) 为获得前 {goal} 名，其自摸条件是什么？"
         pts_list = oya_tsumo if player == scenario["oya"] else ko_tsumo
         ok_end, ok_continue = calculation.calculate_tsumo_conditions(
             player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"], scenario["deposit"],
@@ -147,7 +239,8 @@ def start_quiz():
 
     elif q_type.startswith("ron_"):
         target_player = int(q_type.split('_')[1])
-        question_str = f"问题: 玩家 {player} 为获得前 {goal} 名，其荣和玩家 {target_player} 的条件是什么？"
+        target_wind = WIND_MAP[target_player]
+        question_str = f"问题: 玩家 {player} ({player_wind}) 为获得前 {goal} 名，其荣和玩家 {target_player} ({target_wind}) 的条件是什么？"
         pts_list = oya_ron if player == scenario["oya"] else ko_ron
         ok_end, ok_continue = calculation.calculate_ron_conditions(
             player, target_player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"],
@@ -197,59 +290,28 @@ def start_quiz():
     print("-" * 30)
     print(f"正确答案是: {correct_answer_str}")
 
-    # 更智能的答案评判逻辑
-    student_input = student_answer.strip().lower()
+    # 答案评判逻辑
+    student_input_norm = student_answer.strip().lower().replace(" ", "")
     correct_norm = correct_answer_str.strip().lower().replace(" ", "")
     merged_correct_norm = merged_correct_str.strip().lower().replace(" ", "")
 
-    # 定义别名，将空输入也视作 "〇"
+    # 定义别名
     ok_aliases = ['all', '0', 'o', 'ok', '〇', '']
     no_aliases = ['none', 'x', 'no', '✕']
 
-    # 判断学生输入和正确答案是否属于“全部成功”或“全部失败”的类别
-    is_student_ok = student_input in ok_aliases
+    is_student_ok = student_input_norm in ok_aliases
     is_correct_ok = correct_norm in ok_aliases or merged_correct_norm in ok_aliases
 
-    is_student_no = student_input in no_aliases
+    is_student_no = student_input_norm in no_aliases
     is_correct_no = correct_norm in no_aliases or merged_correct_norm in no_aliases
 
-    # 比较学生的答案和正确答案
     is_correct = False
-    student_input_norm = student_input.replace(" ", "")
-
-    # 1. 两者都属于“全部成功”的别名
     if is_student_ok and is_correct_ok:
         is_correct = True
-    # 2. 两者都属于“全部失败”的别名
     elif is_student_no and is_correct_no:
         is_correct = True
-    # 3. 学生的输入与详细答案或合并答案中的任意一个匹配
     elif student_input_norm == correct_norm or student_input_norm == merged_correct_norm:
         is_correct = True
-    # 4. 特殊情况：当正确答案为"〇"时，检查学生是否输入了等价的 ">= 最低分"
-    elif is_correct_ok:
-        min_score = pts_list[0]
-        is_tsumo = scenario["question_type"] == "tsumo"
-        is_oya = scenario["player_to_ask"] == scenario["oya"]
-
-        # 根据不同情况生成所有可能的正确答案格式
-        expected_formats = []
-        if is_tsumo:
-            if is_oya:
-                # 庄家自摸, e.g., 500 -> ">=500", ">=500all"
-                expected_formats.append(f">={min_score}")
-                expected_formats.append(f">={min_score}all")
-            else:
-                # 子家自摸, e.g., (300, 500) -> ">=300/500", ">=300-500"
-                ko_pay, oya_pay = min_score
-                expected_formats.append(f">={ko_pay}/{oya_pay}")
-                expected_formats.append(f">={ko_pay}-{oya_pay}")
-        else:  # 荣和
-            # 荣和, e.g., 1000 -> ">=1000"
-            expected_formats.append(f">={min_score}")
-
-        if student_input_norm in expected_formats:
-            is_correct = True
 
     if is_correct:
         print("\n恭喜你，完全正确！你已经掌握了！")
