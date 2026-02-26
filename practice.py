@@ -62,6 +62,105 @@ def _get_high_fu_cheat_sheet(player_to_ask, oya, question_type, rules):
     return "\n".join(table_lines)
 
 
+def normalize_student_answer(answer_str):
+    """
+    Normalizes the student's answer string to handle various separators for discontinuous conditions,
+    while correctly ignoring commas within parentheses (e.g., in tsumo point formats).
+    """
+    # First, normalize unambiguous separators to the canonical '或'.
+    # We handle ' or ' with spaces, and other common separators.
+    norm_str = answer_str.strip().lower()
+    norm_str = norm_str.replace(' or ', '或')
+    norm_str = norm_str.replace('||', '或')
+    norm_str = norm_str.replace('|', '或')
+    norm_str = norm_str.replace(';', '或')
+
+    # Remove all spaces for consistent comparison
+    norm_str = norm_str.replace(' ', '')
+    # Also replace 'or' without spaces, which might result from space removal
+    norm_str = norm_str.replace('or', '或')
+
+    # Manually iterate to replace commas only when they are outside of parentheses
+    result = []
+    paren_level = 0
+    for char in norm_str:
+        if char == '(':
+            paren_level += 1
+        elif char == ')':
+            paren_level = max(0, paren_level - 1)  # Avoid going negative
+
+        if char == ',' and paren_level == 0:
+            result.append('或')
+        else:
+            result.append(char)
+
+    return "".join(result)
+
+
+def parse_answer_to_pts(answer_str, all_possible_pts):
+    """解析答案字符串，返回一个包含所有对应点数的集合。"""
+    if not all_possible_pts:
+        return set()
+
+    # Handle special 'all' or 'ok' answers
+    norm_for_alias = answer_str.strip().lower().replace(" ", "")
+    ok_aliases = ['all', '0', 'o', 'ok', '〇', '']
+    if norm_for_alias in ok_aliases:
+        return set(all_possible_pts)
+
+    # 标准化并分割
+    normalized_str = normalize_student_answer(answer_str)
+    parts = normalized_str.split('或')
+
+    final_pts = set()
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        # 处理 >=, >, <=, <
+        try:
+            if part.startswith('>='):
+                val = int(part[2:])
+                final_pts.update({p for p in all_possible_pts if p >= val})
+                continue
+            elif part.startswith('<='):
+                val = int(part[2:])
+                final_pts.update({p for p in all_possible_pts if p <= val})
+                continue
+            elif part.startswith('>'):
+                val = int(part[1:])
+                final_pts.update({p for p in all_possible_pts if p > val})
+                continue
+            elif part.startswith('<'):
+                val = int(part[1:])
+                final_pts.update({p for p in all_possible_pts if p < val})
+                continue
+        except (ValueError, IndexError):
+            continue  # Ignore malformed comparisons
+
+        # 处理范围 ～
+        if '～' in part:
+            try:
+                start_val, end_val = map(int, part.split('～'))
+                final_pts.update({p for p in all_possible_pts if start_val <= p <= end_val})
+            except ValueError:
+                continue  # 忽略格式错误的范围
+        # 处理单个数字
+        else:
+            try:
+                # 移除可能的前导'='
+                cleaned_part = part.lstrip('=')
+                val = int(cleaned_part)
+                if val in all_possible_pts:
+                    final_pts.add(val)
+            except ValueError:
+                continue  # 忽略无法解析的部分
+
+    return final_pts
+
+
 def generate_random_scenario():
     """生成一个随机的对局情景和问题"""
 
@@ -281,36 +380,193 @@ def start_quiz():
     else:
         correct_answer_str = f"{end_str} (终局) / {continue_str} (续行)"
 
-    # --- 4. 向学生提问并获取答案 ---
+    # --- 6. 向学生提问并获取答案 ---
     print(question_str)
-    print("(提示: 请按程序输出的格式作答，例如 '>= 8000'。若答案为'〇'，可直接回车)")
+    print("(提示: 请按程序输出的格式作答。若答案为'〇'，可直接回车。)")
+    print("(不连续条件请使用 逗号(,)、分号(;) 或 or 分隔，例如: <=2000, >=12000)")
     student_answer = input("你的答案: ")
 
     # --- 5. 评判并给出反馈 ---
     print("-" * 30)
     print(f"正确答案是: {correct_answer_str}")
 
-    # 答案评判逻辑
-    student_input_norm = student_answer.strip().lower().replace(" ", "")
-    correct_norm = correct_answer_str.strip().lower().replace(" ", "")
-    merged_correct_norm = merged_correct_str.strip().lower().replace(" ", "")
+    # 将正确答案和学生答案都解析为点数集合进行比较
+    correct_pts_set = parse_answer_to_pts(merged_correct_str, pts_list)
+    student_pts_set = parse_answer_to_pts(student_answer, pts_list)
 
-    # 定义别名
+    # 特殊情况处理：〇 和 ✕
+    student_input_norm = student_answer.strip().lower().replace(" ", "")
     ok_aliases = ['all', '0', 'o', 'ok', '〇', '']
     no_aliases = ['none', 'x', 'no', '✕']
 
     is_student_ok = student_input_norm in ok_aliases
-    is_correct_ok = correct_norm in ok_aliases or merged_correct_norm in ok_aliases
+    is_correct_ok = (merged_correct_str == "〇")
 
     is_student_no = student_input_norm in no_aliases
-    is_correct_no = correct_norm in no_aliases or merged_correct_norm in no_aliases
+    is_correct_no = (merged_correct_str == "✕")
 
     is_correct = False
     if is_student_ok and is_correct_ok:
         is_correct = True
     elif is_student_no and is_correct_no:
         is_correct = True
-    elif student_input_norm == correct_norm or student_input_norm == merged_correct_norm:
+    # For non-special cases, compare the parsed point sets
+    elif not is_correct_ok and not is_correct_no and correct_pts_set == student_pts_set:
+        is_correct = True
+
+    if is_correct:
+        print("\n恭喜你，完全正确！你已经掌握了！")
+    else:
+        print("\n答案不完全正确，请对照正确答案，检查你的计算过程。")
+
+
+def start_hard_quiz():
+    """开始一个“真剣勝負”练习会话，专门寻找难题。"""
+    print("\n--- 真剣勝負模式 ---")
+    print("正在生成题目，请稍候...")
+
+    found_scenario = False
+    scenario_data = {}
+
+    while not found_scenario:
+        # 1. 场景生成
+        scenario = generate_random_scenario()
+        rules = scenario["rules"]
+        all_pts = scenario["start_pts"] + scenario["other_players_pts"]
+        tiebreaker = scenario["tiebreaker"]
+
+        # 2. 计算答案，检查是否为不连续条件
+        oya_tsumo, ko_tsumo, oya_ron, ko_ron = generate_all_possible_points(
+            kiriage_mangan=rules.get("kiriage_mangan", True),
+            allow_double_yakuman=rules.get("allow_double_yakuman", True),
+            allow_composite_yakuman=rules.get("allow_composite_yakuman", True)
+        )
+
+        q_type = scenario["question_type"]
+        player = scenario["player_to_ask"]
+        goal = scenario["goal_placement"]
+        ok_end, ok_continue, pts_list = [], [], []
+
+        if q_type == "tsumo":
+            pts_list = oya_tsumo if player == scenario["oya"] else ko_tsumo
+            ok_end, ok_continue = calculation.calculate_tsumo_conditions(
+                player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"], scenario["deposit"],
+                scenario["riichi_status"], all_pts, goal, tiebreaker, rules, pts_list)
+        elif q_type.startswith("ron_"):
+            target_player = int(q_type.split('_')[1])
+            pts_list = oya_ron if player == scenario["oya"] else ko_ron
+            ok_end, ok_continue = calculation.calculate_ron_conditions(
+                player, target_player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"],
+                scenario["deposit"], scenario["riichi_status"], all_pts, goal, tiebreaker, rules, pts_list)
+
+        merged_ok_pts = sorted(list(set(ok_end) | set(ok_continue)))
+        formatted_merged_str = format_as_intervals(merged_ok_pts, pts_list)
+
+        # 检查条件是否是不连续的 (包含 "或" 字)
+        if "或" in formatted_merged_str:
+            found_scenario = True
+            scenario_data = {
+                "scenario": scenario,
+                "ok_end": ok_end,
+                "ok_continue": ok_continue,
+                "pts_list": pts_list
+            }
+
+    # --- 3. 提取找到的场景和答案 ---
+    scenario = scenario_data["scenario"]
+    rules = scenario["rules"]
+    ok_end = scenario_data["ok_end"]
+    ok_continue = scenario_data["ok_continue"]
+    pts_list = scenario_data["pts_list"]
+    player = scenario["player_to_ask"]
+    goal = scenario["goal_placement"]
+    q_type = scenario["question_type"]
+
+    # --- 4. 打印场景和问题 ---
+    WIND_MAP = {0: "东", 1: "南", 2: "西", 3: "北"}
+    oya_wind = WIND_MAP[scenario["oya"]]
+
+    print("--- 麻将终局条件计算练习 ---")
+    print(f"规则: {rules['name']}")
+    print(f"顺位马: {rules['placement_pts']}")
+    print(f"赛前积分: {scenario['start_pts']}")
+    print(f"当前局内点数: {scenario['pts_in_hand']}")
+    print(f"庄家: 玩家 {scenario['oya']} ({oya_wind})")
+    print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}")
+    print("-" * 30)
+
+    cheat_sheet = _get_high_fu_cheat_sheet(
+        scenario["player_to_ask"], scenario["oya"], scenario["question_type"], rules
+    )
+    print(cheat_sheet)
+    print("")
+
+    # 构造问题字符串
+    player_wind = WIND_MAP[player]
+    question_str = ""
+    if q_type == "tsumo":
+        question_str = f"问题: 玩家 {player} ({player_wind}) 为获得前 {goal} 名，其自摸条件是什么？"
+    elif q_type.startswith("ron_"):
+        target_player = int(q_type.split('_')[1])
+        target_wind = WIND_MAP[target_player]
+        question_str = f"问题: 玩家 {player} ({player_wind}) 为获得前 {goal} 名，其荣和玩家 {target_player} ({target_wind}) 的条件是什么？"
+
+    # --- 5. 格式化正确答案 ---
+    end_str = format_as_intervals(ok_end, pts_list)
+    continue_str = format_as_intervals(ok_continue, pts_list)
+    merged_correct_str = format_as_intervals(sorted(list(set(ok_end) | set(ok_continue))), pts_list)
+
+    is_tsumo = scenario["question_type"] == "tsumo"
+    is_oya = scenario["player_to_ask"] == scenario["oya"]
+    if is_tsumo and is_oya:
+        if end_str and end_str not in ["〇", "✕"]: end_str += " all"
+        if continue_str and continue_str not in ["〇", "✕"]: continue_str += " all"
+        if merged_correct_str and merged_correct_str not in ["〇", "✕"]: merged_correct_str += " all"
+
+    is_end_valid = end_str and end_str != '✕'
+    is_continue_valid = continue_str and continue_str != '✕'
+    if not is_end_valid and not is_continue_valid:
+        correct_answer_str = "✕"
+    elif is_end_valid and not is_continue_valid:
+        correct_answer_str = end_str
+    elif not is_end_valid and is_continue_valid:
+        correct_answer_str = f"{continue_str} (续行)"
+    else:
+        correct_answer_str = f"{end_str} (终局) / {continue_str} (续行)"
+
+    # --- 6. 向学生提问并获取答案 ---
+    print(question_str)
+    print("(提示: 请按程序输出的格式作答。若答案为'〇'，可直接回车。)")
+    print("(不连续条件请使用 逗号(,)、分号(;) 或 or 分隔，例如: <=2000, >=12000)")
+    print("(点数闭区间请使用 波浪线(～) 分隔，例如: 3400～3900, >=24000)")
+    student_answer = input("你的答案: ")
+
+    # --- 7. 评判并给出反馈 ---
+    print("-" * 30)
+    print(f"正确答案是: {correct_answer_str}")
+
+    # 将正确答案和学生答案都解析为点数集合进行比较
+    correct_pts_set = parse_answer_to_pts(merged_correct_str, pts_list)
+    student_pts_set = parse_answer_to_pts(student_answer, pts_list)
+
+    # 特殊情况处理：〇 和 ✕
+    student_input_norm = student_answer.strip().lower().replace(" ", "")
+    ok_aliases = ['all', '0', 'o', 'ok', '〇', '']
+    no_aliases = ['none', 'x', 'no', '✕']
+
+    is_student_ok = student_input_norm in ok_aliases
+    is_correct_ok = (merged_correct_str == "〇")
+
+    is_student_no = student_input_norm in no_aliases
+    is_correct_no = (merged_correct_str == "✕")
+
+    is_correct = False
+    if is_student_ok and is_correct_ok:
+        is_correct = True
+    elif is_student_no and is_correct_no:
+        is_correct = True
+    # For non-special cases, compare the parsed point sets
+    elif not is_correct_ok and not is_correct_no and correct_pts_set == student_pts_set:
         is_correct = True
 
     if is_correct:
@@ -320,4 +576,18 @@ def start_quiz():
 
 
 if __name__ == "__main__":
-    start_quiz()
+    while True:
+        print("\n请选择练习模式:")
+        print("1. 普通模式 (随机生成问题)")
+        print("2. 真剣勝負模式 (专门寻找难题)")
+        print("q. 退出")
+        choice = input("请输入选项: ").strip()
+
+        if choice == '1':
+            start_quiz()
+        elif choice == '2':
+            start_hard_quiz()
+        elif choice.lower() == 'q':
+            break
+        else:
+            print("无效输入，请重新选择。")
