@@ -202,13 +202,13 @@ if __name__ == "__main__":
     # --- 输入模板 ---
     ruleset_name = "SK"
     rules = RULES[ruleset_name]
-    start_pts = [-44.3, 7.6, -20.4, 57.1]
+    start_pts = [17.0, -10.3, 45.7, -52.4]
     other_players_pts = []
-    pts_in_hand = [33300, 20600, 32500, 33600]
+    pts_in_hand = [23600, 32400, 18700, 44300]
     tiebreaker = None
-    deposit = 0
+    deposit = 1
     riichi_status = [0, 0, 0, 0]
-    goal_placement = 3
+    goal_placement = 2
     oya = 3
 
     print(f"--- 使用规则: {rules['name']} ---")
