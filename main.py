@@ -106,6 +106,7 @@ def play(start_pts, pts_in_hand, ruleset, deposit, riichi_status, goal_placement
 
     current_pts = [round(u + v, 1) for u, v in zip(start_pts, game_pts(
         pts_in_hand, ruleset['placement_pts'], ruleset['starting_pts'],
+        tie_resolution=ruleset.get("tie_resolution", "split_points"),
         deposit_final_draw_recipient="unclaimed"))] + other_players_pts
     print(f"当前得分: {current_pts}")
     current_rank = final_ranking(current_pts, tiebreaker)
@@ -200,16 +201,31 @@ def play(start_pts, pts_in_hand, ruleset, deposit, riichi_status, goal_placement
 
 if __name__ == "__main__":
     # --- 输入模板 ---
-    ruleset_name = "SK"
+    ruleset_name = "JT"
     rules = RULES[ruleset_name]
-    start_pts = [17.0, -10.3, 45.7, -52.4]
+    start_pts = [26.8, 9, -6.4, -29.4]
     other_players_pts = []
-    pts_in_hand = [23600, 32400, 18700, 44300]
+    pts_in_hand = [25000, 25000, 25000, 25000]
     tiebreaker = None
-    deposit = 1
+    deposit = 0
     riichi_status = [0, 0, 0, 0]
     goal_placement = 2
     oya = 3
+
+    # --- 座次重排逻辑 ---
+    seating_order_str = "4213"
+
+    if seating_order_str:
+        seating_map = {'1': 0, '2': 1, '3': 2, '4': 3}
+        if sorted(seating_order_str) != ['1', '2', '3', '4']:
+            raise ValueError("seating_order_str 必须是 '1', '2', '3', '4' 的一个有效排列")
+
+        # perm_indices[i] 代表新顺序中位置i的玩家在旧顺序中的索引
+        perm_indices = [seating_map[pos] for pos in seating_order_str]
+
+        # 根据新的座次顺序重排所有与玩家相关的数据列表
+        start_pts = [start_pts[i] for i in perm_indices]
+        riichi_status = [riichi_status[i] for i in perm_indices]
 
     print(f"--- 使用规则: {rules['name']} ---")
     play(start_pts, pts_in_hand, rules,

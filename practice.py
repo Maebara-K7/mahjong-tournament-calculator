@@ -162,7 +162,7 @@ def parse_answer_to_pts(answer_str, all_possible_pts):
 
     # 处理 'all', 'ok' 等特殊答案
     norm_for_alias = answer_str.strip().lower().replace(" ", "")
-    ok_aliases = ['all', '0', 'o', 'ok', '〇', '']
+    ok_aliases = ['all', '0', 'o', 'ok', '〇']
     if norm_for_alias in ok_aliases:
         return set(all_possible_pts)
 
@@ -306,6 +306,7 @@ def generate_random_scenario(forced_q_type=None):
     # 计算当前总分和排名 (模拟当前瞬间流局来评估)
     current_game_pts = game_pts(
         pts_in_hand, rules['placement_pts'], rules['starting_pts'],
+        tie_resolution=rules.get("tie_resolution", "split_points"),
         deposit_final_draw_recipient="unclaimed"
     )
     current_total_pts = [round(u + v, 1) for u, v in zip(start_pts, current_game_pts)] + other_players_pts
@@ -446,7 +447,7 @@ def save_qbank(qbank):
 
 def populate_initial_qbank():
     """生成初始的魔鬼模式题库 (使用并行处理)"""
-    print("正在生成初始魔鬼模式题库，将使用多核并行处理以加快速度...")
+    print("正在生成初始魔鬼模式题库，将使用多核并行处理以加快速度...", flush=True)
     qbank = {"tsumo": [], "ron": []}
 
     try:
@@ -454,11 +455,11 @@ def populate_initial_qbank():
         num_processes = max(1, multiprocessing.cpu_count() - 1)
     except NotImplementedError:
         num_processes = 4  # Fallback
-    print(f"将使用 {num_processes} 个进程。")
+    print(f"将使用 {num_processes} 个进程。", flush=True)
 
     with multiprocessing.Pool(processes=num_processes) as pool:
         # --- 生成自摸问题 ---
-        print("正在并行生成100个自摸难题...")
+        print("正在并行生成100个自摸难题...", flush=True)
         tsumo_results = pool.imap_unordered(_tsumo_worker_for_pool, range(100))
 
         for i, scenario in enumerate(tsumo_results, 1):
@@ -466,7 +467,7 @@ def populate_initial_qbank():
             print(f"已找到 {i}/100 个自摸难题。", flush=True)
 
         # --- 生成荣和问题 ---
-        print("正在并行生成100个荣和难题...")
+        print("正在并行生成100个荣和难题...", flush=True)
         ron_results = pool.imap_unordered(_ron_worker_for_pool, range(100))
 
         for i, scenario in enumerate(ron_results, 1):
@@ -474,7 +475,7 @@ def populate_initial_qbank():
             print(f"已找到 {i}/100 个荣和难题。", flush=True)
 
     save_qbank(qbank)
-    print(f"题库生成完毕，已保存至 {QBANK_FILE}")
+    print(f"题库生成完毕，已保存至 {QBANK_FILE}", flush=True)
 
 
 def start_quiz(min_or_count=0):
@@ -486,7 +487,7 @@ def start_quiz(min_or_count=0):
 
     # 魔鬼模式使用题库
     if min_or_count >= MIN_OR_COUNT_FOR_DEVIL:
-        print(f"正在生成魔鬼模式问题 (至少 {min_or_count} 个'或')...")
+        print(f"正在生成魔鬼模式问题 (至少 {min_or_count} 个'或')...", flush=True)
         qbank = load_qbank()
         found_new_scenario = False
 
@@ -496,7 +497,7 @@ def start_quiz(min_or_count=0):
             if _is_scenario_difficult(temp_scenario, min_or_count):
                 scenario = temp_scenario
                 found_new_scenario = True
-                print("找到了一个新难题！已加入题库。")
+                print("找到了一个新难题！已加入题库。", flush=True)
 
                 # 加入题库并保存
                 bank_key = "tsumo" if q_type_choice == "tsumo" else "ron"
@@ -510,17 +511,17 @@ def start_quiz(min_or_count=0):
         if not found_new_scenario:
             bank_key = "tsumo" if q_type_choice == "tsumo" else "ron"
             if qbank.get(bank_key):
-                print(f"未能在{GENERATION_ATTEMPT_LIMIT}次尝试中生成新难题，从题库中随机选择。")
+                print(f"未能在{GENERATION_ATTEMPT_LIMIT}次尝试中生成新难题，从题库中随机选择。", flush=True)
                 scenario = random.choice(qbank[bank_key])
             else:
-                print(f"题库为空，且无法生成新难题。请先运行菜单选项99填充题库。")
+                print(f"题库为空，且无法生成新难题。请先运行菜单选项99填充题库。", flush=True)
                 return
 
     # 困难或普通模式（无题库）
     else:
         if min_or_count > 0:
             mode_name = "困难"
-            print(f"正在生成{mode_name}模式问题，请稍候...")
+            print(f"正在生成{mode_name}模式问题，请稍候...", flush=True)
             while True:
                 temp_scenario = generate_random_scenario(forced_q_type=q_type_choice)
                 if _is_scenario_difficult(temp_scenario, min_or_count):
@@ -530,7 +531,7 @@ def start_quiz(min_or_count=0):
             scenario = generate_random_scenario(forced_q_type=q_type_choice)
 
     if scenario is None:
-        print("无法生成或获取场景，练习中止。")
+        print("无法生成或获取场景，练习中止。", flush=True)
         return
     rules = scenario["rules"]
     all_pts = scenario["start_pts"] + scenario["other_players_pts"]
@@ -636,11 +637,15 @@ def start_quiz(min_or_count=0):
 
     # --- 6. 向学生提问并获取答案 ---
     print(question_str)
-    print("(提示: 请按程序输出的格式作答。若答案为'〇'，可直接回车。)")
+    print("(提示: 请按程序输出的格式作答。若答案为'〇'，可填写'o'。)")
     print("(不连续条件请使用 逗号(,)、分号(;) 或 or 分隔，例如: <=2000, >=12000)")
     print("(点数闭区间请使用 波浪线(~) 分隔，例如: 3400~3900, >=24000)")
     start_time = time.time()
-    student_answer = input("你的答案: ")
+    while True:
+        student_answer = input("你的答案: ")
+        if student_answer.strip() != "":
+            break
+        print("输入不能为空，请重新输入。", flush=True)
     end_time = time.time()
 
     # --- 5. 评判并给出反馈 ---
@@ -682,19 +687,19 @@ def start_quiz(min_or_count=0):
 
 def _display_exam_results(exam_results, seed, total_time):
     """显示考试结果的摘要。"""
-    print("\n" + "="*40)
-    print(" " * 15 + "考试结果")
-    print("="*40)
+    print("\n" + "="*40, flush=True)
+    print(" " * 15 + "考试结果", flush=True)
+    print("="*40, flush=True)
 
     time_limit_seconds = 30 * 60  # 30分钟
     overtime = max(0, total_time - time_limit_seconds)
     penalty_points = math.ceil(overtime / 15) if overtime > 0 else 0
 
     total_minutes, total_seconds = divmod(int(total_time), 60)
-    print(f"总用时: {total_minutes} 分 {total_seconds} 秒 (限时 30 分钟)")
+    print(f"总用时: {total_minutes} 分 {total_seconds} 秒 (限时 30 分钟)", flush=True)
     if overtime > 0:
         overtime_minutes, overtime_seconds = divmod(int(overtime), 60)
-        print(f"超时: {overtime_minutes} 分 {overtime_seconds} 秒，扣分: -{penalty_points} 分")
+        print(f"超时: {overtime_minutes} 分 {overtime_seconds} 秒，扣分: -{penalty_points} 分", flush=True)
 
     difficulty_points = {'simple': 10, 'hard': 20, 'devil': 30}
 
@@ -708,29 +713,29 @@ def _display_exam_results(exam_results, seed, total_time):
     base_score = simple_score + hard_score + devil_score
     final_score = base_score - penalty_points
 
-    print("\n--- 得分报告 ---")
-    print(f"普通题 (3题): {simple_correct}/3, 得分 {simple_score}/30")
-    print(f"困难题 (2题): {hard_correct}/2, 得分 {hard_score}/40")
-    print(f"魔鬼题 (1题): {devil_correct}/1, 得分 {devil_score}/30")
-    print("-" * 20)
-    print(f"基础得分: {base_score} / 100")
+    print("\n--- 得分报告 ---", flush=True)
+    print(f"普通题 (3题): {simple_correct}/3, 得分 {simple_score}/30", flush=True)
+    print(f"困难题 (2题): {hard_correct}/2, 得分 {hard_score}/40", flush=True)
+    print(f"魔鬼题 (1题): {devil_correct}/1, 得分 {devil_score}/30", flush=True)
+    print("-" * 20, flush=True)
+    print(f"基础得分: {base_score} / 100", flush=True)
     if penalty_points > 0:
-        print(f"超时扣分: -{penalty_points}")
-    print(f"最终总分: {final_score} / 100")
-    print(f"本次考试种子: {seed} (可在菜单使用此种子复盘)")
-    print("="*40)
+        print(f"超时扣分: -{penalty_points}", flush=True)
+    print(f"最终总分: {final_score} / 100", flush=True)
+    print(f"本次考试种子: {seed} (可在菜单使用此种子复盘)", flush=True)
+    print("="*40, flush=True)
 
     if final_score < 100:
-        print("\n--- 错题回顾 ---")
+        print("\n--- 错题回顾 ---", flush=True)
         for i, result in enumerate(exam_results):
             if not result['is_correct']:
                 difficulty = result.get('difficulty', 'unknown')
                 points = difficulty_points.get(difficulty, 0)
                 time_taken_str = f"用时: {result['time_taken']:.2f}秒"
-                print(f"\n--- 第 {i+1} 题 (错误, 本题 {points} 分, {time_taken_str}) ---")
-                print(result['question_str'])
-                print(f"你的答案: {result['student_answer_raw']}")
-                print(f"正确答案: {result['correct_answer_str']}")
+                print(f"\n--- 第 {i+1} 题 (错误, 本题 {points} 分, {time_taken_str}) ---", flush=True)
+                print(result['question_str'], flush=True)
+                print(f"你的答案: {result['student_answer_raw']}", flush=True)
+                print(f"正确答案: {result['correct_answer_str']}", flush=True)
 
 
 def start_exam_mode(seed=None):
@@ -807,22 +812,22 @@ def start_exam_mode(seed=None):
         WIND_MAP = {0: "东", 1: "南", 2: "西", 3: "北"}
         oya_wind = WIND_MAP[scenario["oya"]]
 
-        print(f"规则: {rules['name']}")
-        print(f"顺位马: {rules['placement_pts']}")
-        print(f"赛前积分: {scenario['start_pts']}")
+        print(f"规则: {rules['name']}", flush=True)
+        print(f"顺位马: {rules['placement_pts']}", flush=True)
+        print(f"赛前积分: {scenario['start_pts']}", flush=True)
         player_to_ask_idx = scenario['player_to_ask']
         pts_in_hand = scenario['pts_in_hand']
         player_to_ask_score = pts_in_hand[player_to_ask_idx]
         point_diffs = [p - player_to_ask_score for p in pts_in_hand]
-        print(f"局内点数: {pts_in_hand}")
-        print(f"局内点差: {point_diffs} (相对选手 {player_to_ask_idx})")
-        print(f"当前总分: {scenario['current_total_pts']}")
-        print(f"庄家: 选手 {scenario['oya']} ({oya_wind})")
-        print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}")
-        print("-" * 30)
+        print(f"局内点数: {pts_in_hand}", flush=True)
+        print(f"局内点差: {point_diffs} (相对选手 {player_to_ask_idx})", flush=True)
+        print(f"当前总分: {scenario['current_total_pts']}", flush=True)
+        print(f"庄家: 选手 {scenario['oya']} ({oya_wind})", flush=True)
+        print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}", flush=True)
+        print("-" * 30, flush=True)
         cheat_sheet = _get_high_fu_cheat_sheet(scenario["player_to_ask"], scenario["oya"], scenario["question_type"], rules)
-        print(cheat_sheet)
-        print("")
+        print(cheat_sheet, flush=True)
+        print("", flush=True)
 
         # --- 4. 计算正确答案 ---
         oya_tsumo, ko_tsumo, oya_ron, ko_ron = generate_all_possible_points(
@@ -881,7 +886,11 @@ def start_exam_mode(seed=None):
         # --- 5. 获取学生答案 ---
         question_start_time = time.time()
         print(question_str, flush=True)
-        student_answer_raw = input("你的答案: ")
+        while True:
+            student_answer_raw = input("你的答案: ")
+            if student_answer_raw.strip() != "":
+                break
+            print("输入不能为空，请重新输入。", flush=True)
         question_end_time = time.time()
         time_taken = question_end_time - question_start_time
 
@@ -937,15 +946,15 @@ def start_exam_mode(seed=None):
 
 if __name__ == "__main__":
     while True:
-        print("\n请选择练习模式:")
-        print("1. 普通练习")
-        print("2. 困难模式 (至少一个'或')")
-        print("3. 魔鬼模式 (至少两个'或')")
-        print("4. 考试模式 (预计用时 30 分钟)")
-        print("5. 使用种子复盘考试")
-        print("0. 退出")
+        print("\n请选择练习模式:", flush=True)
+        print("1. 普通练习", flush=True)
+        print("2. 困难模式 (至少一个'或')", flush=True)
+        print("3. 魔鬼模式 (至少两个'或')", flush=True)
+        print("4. 考试模式 (预计用时 30 分钟)", flush=True)
+        print("5. 使用种子复盘考试", flush=True)
+        print("0. 退出", flush=True)
         if not os.path.exists(QBANK_FILE):
-            print("99. (首次使用)生成魔鬼模式题库")
+            print("99. (首次使用)生成魔鬼模式题库", flush=True)
         choice = input("你的选择: ")
 
         if choice == '0':
@@ -963,8 +972,8 @@ if __name__ == "__main__":
                 seed_input = int(input("请输入考试种子: ").strip())
                 start_exam_mode(seed=seed_input)
             except ValueError:
-                print("无效的种子，请输入一个数字。")
+                print("无效的种子，请输入一个数字。", flush=True)
         elif choice == '99':
             populate_initial_qbank()
         else:
-            print("无效输入，请重新选择。")
+            print("无效输入，请重新选择。", flush=True)
