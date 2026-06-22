@@ -61,7 +61,7 @@ RULES = {
     },
 
     "CUS": {
-        "name": "雀魂比赛场规则",
+        "name": "雀魂比赛场 规则",
         "placement_pts": [30, 10, -10, -30],
         "starting_pts": 25000,
         "kiriage_mangan": False,
