@@ -1,3 +1,6 @@
+# main.py
+# 主程序，根据输入计算获胜条件
+
 from cond_lib import *
 from rulesets import RULES
 import calculation
