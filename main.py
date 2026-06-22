@@ -28,13 +28,16 @@ def _print_conditions(base_str, end_str, continue_str):
         print(f"{base_str}[续行]: {continue_str}")
 
 
-def play(start_pts, pts_in_hand, ruleset, deposit, riichi_status, goal_placement,
+def play(start_pts, pts_in_hand, ruleset, deposit, riichi_status, goal_placement_list,
          oya=3, tiebreaker=None, other_players_pts=None):
     # --- 1. 初始化和输入验证 ---
     if other_players_pts is None:
         other_players_pts = []
     # 将场上四人分数与场外玩家分数合并，用于后续排名计算
     all_pts = start_pts + other_players_pts
+
+    # 标准化顺位目标列表
+    goal_placement_list = sorted(set(goal_placement_list))
 
     if tiebreaker is None:
         # 如果没有提供tiebreaker，则根据所有玩家的当前分数生成
@@ -68,7 +71,7 @@ def play(start_pts, pts_in_hand, ruleset, deposit, riichi_status, goal_placement
             prompt = (
                 f"\n点数检查失败，总点数多了 {difference} 点。\n"
                 f"这正好是 {num_riichi} 位玩家的立直棒点数。\n"
-                f"是否自动从立直玩家的手牌点数中各扣除1000点并继续计算？ (y/n): "
+                f"是否自动从立直玩家的手牌点数中各扣除 1000 点并继续计算？ (y/n): "
             )
             choice = input(prompt).lower()
             if choice == 'y':
@@ -115,105 +118,110 @@ def play(start_pts, pts_in_hand, ruleset, deposit, riichi_status, goal_placement
 
     # --- 2. 循环为每个玩家计算和打印 ---
     for player in range(4):
-        print(f"----- 玩家 {player} 胜利条件 (目标: 前{goal_placement}) -----")
+        for goal_placement in goal_placement_list:
+            print(f"----- 玩家 {player} 胜利条件 (目标: 前{goal_placement}) -----")
 
-        # 自摸条件
-        tsumo_pts = oya_tsumo if player == oya else ko_tsumo
-        ok_tsumo_end, ok_tsumo_continue = calculation.calculate_tsumo_conditions(
-            player, oya, pts_in_hand, honba, deposit, riichi_status,
-            all_pts, goal_placement, tiebreaker, ruleset, tsumo_pts)
+            # 自摸条件
+            tsumo_pts = oya_tsumo if player == oya else ko_tsumo
+            ok_tsumo_end, ok_tsumo_continue = calculation.calculate_tsumo_conditions(
+                player, oya, pts_in_hand, honba, deposit, riichi_status,
+                all_pts, goal_placement, tiebreaker, ruleset, tsumo_pts)
 
-        tsumo_end_str = format_as_intervals(ok_tsumo_end, tsumo_pts)
-        if player == oya and tsumo_end_str != "✕" and tsumo_end_str != "〇":
-            tsumo_end_str = f"{tsumo_end_str} all"
+            tsumo_end_str = format_as_intervals(ok_tsumo_end, tsumo_pts)
+            if player == oya and tsumo_end_str != "✕" and tsumo_end_str != "〇":
+                tsumo_end_str = f"{tsumo_end_str} all"
 
-        tsumo_continue_str = format_as_intervals(ok_tsumo_continue, tsumo_pts)
-        if player == oya and tsumo_continue_str != "✕" and tsumo_continue_str != "〇":
-            tsumo_continue_str = f"{tsumo_continue_str} all"
+            tsumo_continue_str = format_as_intervals(ok_tsumo_continue, tsumo_pts)
+            if player == oya and tsumo_continue_str != "✕" and tsumo_continue_str != "〇":
+                tsumo_continue_str = f"{tsumo_continue_str} all"
 
-        _print_conditions(f"玩家{player}自摸条件", tsumo_end_str, tsumo_continue_str)
+            _print_conditions(f"玩家{player}自摸条件", tsumo_end_str, tsumo_continue_str)
 
-        # 荣和条件
-        for player2 in range(4):
-            if player == player2: continue
-            ron_pts = oya_ron if player == oya else ko_ron
-            ok_ron_end, ok_ron_continue = calculation.calculate_ron_conditions(
-                player, player2, oya, pts_in_hand, honba, deposit,
-                riichi_status, all_pts, goal_placement, tiebreaker, ruleset,
-                ron_pts)
+            # 荣和条件
+            for player2 in range(4):
+                if player == player2: continue
+                ron_pts = oya_ron if player == oya else ko_ron
+                ok_ron_end, ok_ron_continue = calculation.calculate_ron_conditions(
+                    player, player2, oya, pts_in_hand, honba, deposit,
+                    riichi_status, all_pts, goal_placement, tiebreaker, ruleset,
+                    ron_pts)
 
-            ron_end_str = format_as_intervals(ok_ron_end, ron_pts)
-            ron_continue_str = format_as_intervals(ok_ron_continue, ron_pts)
+                ron_end_str = format_as_intervals(ok_ron_end, ron_pts)
+                ron_continue_str = format_as_intervals(ok_ron_continue, ron_pts)
 
-            _print_conditions(f"玩家{player}荣和玩家{player2}条件", ron_end_str, ron_continue_str)
+                _print_conditions(f"玩家{player}荣和玩家{player2}条件", ron_end_str, ron_continue_str)
 
-        # 被动荣和（放铳）条件
-        for player2 in range(4):
-            if player == player2: continue
-            lose_pts = oya_ron if player2 == oya else ko_ron
-            ok_passive_ron = calculation.calculate_passive_ron_conditions(player, player2, oya, pts_in_hand, honba,
-                                                                          deposit, riichi_status, all_pts,
-                                                                          goal_placement, tiebreaker, ruleset, lose_pts)
-            if ok_passive_ron or current_rank[player] <= goal_placement:
-                print(f"玩家{player}被玩家{player2}荣和条件: {format_as_intervals(ok_passive_ron, lose_pts)}")
-
-        # 被动自摸条件
-        for player2 in range(4):
-            if player == player2: continue
-            lose_pts = oya_tsumo if player2 == oya else ko_tsumo
-            ok_passive_tsumo = calculation.calculate_passive_tsumo_conditions(player, player2, oya, pts_in_hand, honba,
+            # 被动荣和（放铳）条件
+            for player2 in range(4):
+                if player == player2: continue
+                lose_pts = oya_ron if player2 == oya else ko_ron
+                ok_passive_ron = calculation.calculate_passive_ron_conditions(player, player2, oya, pts_in_hand, honba,
                                                                               deposit, riichi_status, all_pts,
-                                                                              goal_placement, tiebreaker, ruleset,
-                                                                              lose_pts)
-            if ok_passive_tsumo:
-                print(f"玩家{player}被玩家{player2}自摸条件: {format_as_intervals(ok_passive_tsumo, lose_pts)}")
+                                                                              goal_placement, tiebreaker, ruleset, lose_pts)
+                if ok_passive_ron or current_rank[player] <= goal_placement:
+                    print(f"玩家{player}被玩家{player2}荣和条件: {format_as_intervals(ok_passive_ron, lose_pts)}")
 
-        # 流局条件
-        draw_results = calculation.calculate_draw_conditions(player, oya, riichi_status, pts_in_hand, honba, all_pts,
-                                                             goal_placement, tiebreaker, ruleset)
+            # 被动自摸条件
+            for player2 in range(4):
+                if player == player2: continue
+                lose_pts = oya_tsumo if player2 == oya else ko_tsumo
+                ok_passive_tsumo = calculation.calculate_passive_tsumo_conditions(player, player2, oya, pts_in_hand, honba,
+                                                                                  deposit, riichi_status, all_pts,
+                                                                                  goal_placement, tiebreaker, ruleset,
+                                                                                  lose_pts)
+                if ok_passive_tsumo:
+                    result_str = format_as_intervals(ok_passive_tsumo, lose_pts)
+                    if player2 == oya and result_str != "✕" and result_str != "〇":
+                        result_str = f"{result_str} all"
+                    print(f"玩家{player}被玩家{player2}自摸条件: {result_str}")
 
-        # 调用原始函数获取完整字符串
-        full_draw_end_str = format_draw_condition_string(player, draw_results["tenpai_ok_end"],
-                                                         draw_results["noten_ok_end"],
-                                                         draw_results["all_cases_end"], "(终局)")
-        # 从 "玩家X流局条件(终局): " 后提取核心描述
-        draw_end_str = full_draw_end_str.split(': ', 1)[1] if full_draw_end_str else None
+            # 流局条件
+            draw_results = calculation.calculate_draw_conditions(player, oya, riichi_status, pts_in_hand, honba, all_pts,
+                                                                 goal_placement, tiebreaker, ruleset)
 
-        # 调用原始函数获取完整字符串
-        full_draw_continue_str = format_draw_condition_string(player, draw_results["tenpai_ok_continue"],
-                                                              draw_results["noten_ok_continue"],
-                                                              draw_results["all_cases_continue"], "[续行]")
-        # 从 "玩家X流局条件[续行]: " 后提取核心描述
-        draw_continue_str = full_draw_continue_str.split(': ', 1)[1] if full_draw_continue_str else None
+            # 调用原始函数获取完整字符串
+            full_draw_end_str = format_draw_condition_string(player, draw_results["tenpai_ok_end"],
+                                                             draw_results["noten_ok_end"],
+                                                             draw_results["all_cases_end"], "(终局)")
+            # 从 "玩家X流局条件(终局): " 后提取核心描述
+            draw_end_str = full_draw_end_str.split(': ', 1)[1] if full_draw_end_str else None
 
-        _print_conditions(f"玩家{player}流局条件", draw_end_str, draw_continue_str)
+            # 调用原始函数获取完整字符串
+            full_draw_continue_str = format_draw_condition_string(player, draw_results["tenpai_ok_continue"],
+                                                                  draw_results["noten_ok_continue"],
+                                                                  draw_results["all_cases_continue"], "[续行]")
+            # 从 "玩家X流局条件[续行]: " 后提取核心描述
+            draw_continue_str = full_draw_continue_str.split(': ', 1)[1] if full_draw_continue_str else None
 
-        # 新增：分析立直对流局条件的影响
-        if riichi_status[player] == 0:
-            riichi_impact_str = calculation.analyze_riichi_impact_on_draw(
-                player, oya, riichi_status, pts_in_hand, honba, all_pts,
-                goal_placement, tiebreaker, ruleset)
-            if riichi_impact_str is not None:
-                print(riichi_impact_str)
+            _print_conditions(f"玩家{player}流局条件", draw_end_str, draw_continue_str)
 
-        if player < 3: print()
+            # 新增：分析立直对流局条件的影响
+            if riichi_status[player] == 0:
+                riichi_impact_str = calculation.analyze_riichi_impact_on_draw(
+                    player, oya, riichi_status, pts_in_hand, honba, all_pts,
+                    goal_placement, tiebreaker, ruleset)
+                if riichi_impact_str is not None:
+                    print(riichi_impact_str)
+
+            if player < 3 or goal_placement != goal_placement_list[-1]:
+                print()
 
 
 if __name__ == "__main__":
     # --- 输入模板 ---
-    ruleset_name = "JT"
-    rules = RULES[ruleset_name]
-    start_pts = [26.8, 9, -6.4, -29.4]
-    other_players_pts = []
-    pts_in_hand = [25000, 25000, 25000, 25000]
-    tiebreaker = None
-    deposit = 0
-    riichi_status = [0, 0, 0, 0]
-    goal_placement = 2
-    oya = 3
+    ruleset_name = "ML"
+    my_rules = RULES[ruleset_name]
+    my_start_pts = [20.3, -64.7, -26.0, 70.4]
+    my_other_players_pts = []
+    my_pts_in_hand = [24400, 65300, -5200, 15500]
+    my_tiebreaker = None
+    my_deposit = 0
+    my_riichi_status = [0, 1, 0, 0]
+    my_goal_placement_list = [1, 2]
+    my_oya = 3
 
     # --- 座次重排逻辑 ---
-    seating_order_str = "4213"
+    seating_order_str = "1234"
 
     if seating_order_str:
         seating_map = {'1': 0, '2': 1, '3': 2, '4': 3}
@@ -224,10 +232,10 @@ if __name__ == "__main__":
         perm_indices = [seating_map[pos] for pos in seating_order_str]
 
         # 根据新的座次顺序重排所有与玩家相关的数据列表
-        start_pts = [start_pts[i] for i in perm_indices]
-        riichi_status = [riichi_status[i] for i in perm_indices]
+        my_start_pts = [my_start_pts[i] for i in perm_indices]
+        my_riichi_status = [my_riichi_status[i] for i in perm_indices]
 
-    print(f"--- 使用规则: {rules['name']} ---")
-    play(start_pts, pts_in_hand, rules,
-         deposit=deposit, riichi_status=riichi_status, goal_placement=goal_placement,
-         oya=oya, tiebreaker=tiebreaker, other_players_pts=other_players_pts)
+    print(f"--- 使用规则: {my_rules['name']} ---")
+    play(my_start_pts, my_pts_in_hand, my_rules,
+         deposit=my_deposit, riichi_status=my_riichi_status, goal_placement_list=my_goal_placement_list,
+         oya=my_oya, tiebreaker=my_tiebreaker, other_players_pts=my_other_players_pts)

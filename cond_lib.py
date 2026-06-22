@@ -6,10 +6,12 @@ def ceil_to_hundred(n):
     return math.ceil(n / 100) * 100
 
 
-def generate_all_possible_points(kiriage_mangan=True, allow_double_yakuman=False, allow_composite_yakuman=True):
+def generate_all_possible_points(kiriage_mangan=True, allow_double_yakuman=False, allow_composite_yakuman=True, fu_limit=None):
     fan = [1, 2, 3, 4]
 
     fu = [20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110]
+    if fu_limit is not None:
+        fu = [f for f in fu if f <= fu_limit]
     exception = [(1, 20), (1, 25), (1, 110), (2, 25)]
     if kiriage_mangan:
         kiriage_exceptions = [(3, 60), (4, 30)]
@@ -40,6 +42,8 @@ def generate_all_possible_points(kiriage_mangan=True, allow_double_yakuman=False
     ko_tsumo.extend([(2000, 4000), (3000, 6000), (4000, 8000), (6000, 12000)])
 
     fu = [25, 30, 40, 50, 60, 70, 80, 90, 100, 110]
+    if fu_limit is not None:
+        fu = [f for f in fu if f <= fu_limit]
     exception = [(1, 25)]
     if kiriage_mangan:
         kiriage_exceptions = [(3, 60), (4, 30)]

@@ -1,4 +1,4 @@
-# practice.py
+# saikouisen_practice.py - 最高位战规则(SK) 50符以下练习
 """
 麻将终局条件计算练习程序
 
@@ -16,7 +16,7 @@ from cond_lib import *
 from rulesets import RULES
 import calculation
 
-QBANK_FILE = 'devil_mode_qbank.json'
+QBANK_FILE = 'devil_mode_qbank_saikouisen_practice.json'
 GENERATION_ATTEMPT_LIMIT = 100
 MIN_OR_COUNT_FOR_DEVIL = 2
 
@@ -42,56 +42,6 @@ def _generate_geom_with_max(max_val):
         k = _generate_unbounded_geom()
         if k <= max_val:
             return k
-
-
-def _get_high_fu_cheat_sheet(player_to_ask, oya, question_type, rules):
-    """为高符数（70, 90, 110）生成一个提示单。"""
-    is_oya = player_to_ask == oya
-    is_tsumo = question_type == "tsumo"
-
-    fu_to_display = [70, 90, 110]
-    han_to_display = [1, 2]
-
-    type_str = ("亲家" if is_oya else "子家") + ("自摸" if is_tsumo else "荣和")
-    header = f"--- 高符数点数速查表 ({type_str}) ---"
-
-    table_lines = [header]
-    col_headers = ["符数"] + [f"{h}番" for h in han_to_display]
-    table_lines.append("{:<5} | {:<9} | {:<9}".format(*col_headers))
-    table_lines.append("-" * (len(table_lines[1]) + 2))
-
-    for fu in fu_to_display:
-        row_data = [f"{fu}符"]
-        for han in han_to_display:
-            # 不存在 1 番 110 符自摸
-            if is_tsumo and han == 1 and fu == 110:
-                row_data.append("--")
-                continue
-
-            if is_tsumo:
-                if is_oya:
-                    # 亲家自摸
-                    pts = ceil_to_hundred(2 * fu * 2 ** (han + 2))
-                    row_data.append(f"{pts} all")
-                else:
-                    # 子家自摸
-                    ko_pts = ceil_to_hundred(fu * 2 ** (han + 2))
-                    oya_pts = ceil_to_hundred(2 * fu * 2 ** (han + 2))
-                    row_data.append(f"{ko_pts}/{oya_pts}")
-            else:
-                if is_oya:
-                    # 亲家荣和
-                    pts = ceil_to_hundred(6 * fu * 2 ** (han + 2))
-                    row_data.append(str(pts))
-                else:
-                    # 子家荣和
-                    pts = ceil_to_hundred(4 * fu * 2 ** (han + 2))
-                    row_data.append(str(pts))
-
-        table_lines.append("{:<5} | {:<9} | {:<9}".format(*row_data))
-
-    table_lines.append("-" * (len(table_lines[1]) + 2))
-    return "\n".join(table_lines)
 
 
 def normalize_student_answer(answer_str):
@@ -205,7 +155,7 @@ def parse_answer_to_pts(answer_str, all_possible_pts):
                 start_val = _parse_str_to_val(start_str, is_tsumo)
                 end_val = _parse_str_to_val(end_str, is_tsumo)
                 final_pts.update({p for p in all_possible_pts if start_val <= p <= end_val})
-            
+
             # 处理单个值
             else:
                 cleaned_part = part.lstrip('=')
@@ -220,13 +170,12 @@ def parse_answer_to_pts(answer_str, all_possible_pts):
     return final_pts
 
 
-
 def generate_random_scenario(forced_q_type=None):
     """生成一个随机的对局情景和问题"""
 
-    # 1. 随机选择规则 (排除 "CUS")
+    # 1. 选择最高位战规则
     available_rules = {k: v for k, v in RULES.items() if k != "CUS"}
-    ruleset_name = random.choice(list(available_rules.keys()))
+    ruleset_name = "SK"
     rules = available_rules[ruleset_name]
 
     # 2. 随机生成赛前积分
@@ -254,13 +203,21 @@ def generate_random_scenario(forced_q_type=None):
             deposit_final_draw_recipient=rules.get("deposit_final_draw_recipient", "first_place")
         )
 
+        # 将原始点数和对应的顺位马打包，然后一起洗牌
+        # 这是为了确保剧本被随机分配给四位玩家
+        combined = list(zip(simulated_pts_in_hand, game_scores))
+        random.shuffle(combined)
+        
+        # 解包，得到顺序一致但已经被随机分配的分数
+        _, shuffled_scores = zip(*combined)
+        game_scores = list(shuffled_scores)
+
         # 累积得分
         for i in range(4):
             start_pts[i] += game_scores[i]
 
     # 将最终分数四舍五入到一位小数
     start_pts = [round(p, 1) for p in start_pts]
-    random.shuffle(start_pts)
 
     # 3. 随机生成本场、场供等参数
     oya = 3
@@ -378,7 +335,8 @@ def _is_scenario_difficult(scenario, min_or_count):
         oya_tsumo, ko_tsumo, oya_ron, ko_ron = generate_all_possible_points(
             kiriage_mangan=temp_rules.get("kiriage_mangan", True),
             allow_double_yakuman=temp_rules.get("allow_double_yakuman", True),
-            allow_composite_yakuman=temp_rules.get("allow_composite_yakuman", True)
+            allow_composite_yakuman=temp_rules.get("allow_composite_yakuman", True),
+            fu_limit=50
         )
 
         q_type = scenario["question_type"]
@@ -420,9 +378,11 @@ def _find_one_difficult_scenario_worker(q_type, min_or_count):
         if _is_scenario_difficult(scenario, min_or_count):
             return scenario
 
+
 def _tsumo_worker_for_pool(_):
     """(内部使用) 多进程池的自摸场景生成器。"""
     return _find_one_difficult_scenario_worker('tsumo', MIN_OR_COUNT_FOR_DEVIL)
+
 
 def _ron_worker_for_pool(_):
     """(内部使用) 多进程池的荣和场景生成器。"""
@@ -542,7 +502,7 @@ def start_quiz(min_or_count=0):
     WIND_MAP = {0: "东", 1: "南", 2: "西", 3: "北"}
     oya_wind = WIND_MAP[scenario["oya"]]
 
-    print("\n--- 麻将终局条件计算练习 ---")
+    print("\n--- 麻将终局条件计算练习 (限 50 符及以内) ---")
     print(f"规则: {rules['name']}")
     print(f"顺位马: {rules['placement_pts']}")
     print(f"赛前积分: {scenario['start_pts']}")
@@ -563,18 +523,12 @@ def start_quiz(min_or_count=0):
     print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}")
     print("-" * 30)
 
-    # 提问之前给出速查表
-    cheat_sheet = _get_high_fu_cheat_sheet(
-        scenario["player_to_ask"], scenario["oya"], scenario["question_type"], rules
-    )
-    print(cheat_sheet)
-    print("")
-
     # --- 3. 计算正确答案 ---
     oya_tsumo, ko_tsumo, oya_ron, ko_ron = generate_all_possible_points(
         kiriage_mangan=rules.get("kiriage_mangan", True),
         allow_double_yakuman=rules.get("allow_double_yakuman", True),
-        allow_composite_yakuman=rules.get("allow_composite_yakuman", True)
+        allow_composite_yakuman=rules.get("allow_composite_yakuman", True),
+        fu_limit=50
     )
 
     question_str = ""
@@ -688,9 +642,9 @@ def start_quiz(min_or_count=0):
 
 def _display_exam_results(exam_results, seed, total_time):
     """显示考试结果的摘要。"""
-    print("\n" + "="*40, flush=True)
+    print("\n" + "=" * 40, flush=True)
     print(" " * 15 + "考试结果", flush=True)
-    print("="*40, flush=True)
+    print("=" * 40, flush=True)
 
     time_limit_seconds = 30 * 60  # 30分钟
     overtime = max(0, total_time - time_limit_seconds)
@@ -724,7 +678,7 @@ def _display_exam_results(exam_results, seed, total_time):
         print(f"超时扣分: -{penalty_points}", flush=True)
     print(f"最终总分: {final_score} / 100", flush=True)
     print(f"本次考试种子: {seed} (可在菜单使用此种子复盘)", flush=True)
-    print("="*40, flush=True)
+    print("=" * 40, flush=True)
 
     if final_score < 100:
         print("\n--- 错题回顾 ---", flush=True)
@@ -733,7 +687,7 @@ def _display_exam_results(exam_results, seed, total_time):
                 difficulty = result.get('difficulty', 'unknown')
                 points = difficulty_points.get(difficulty, 0)
                 time_taken_str = f"用时: {result['time_taken']:.2f}秒"
-                print(f"\n--- 第 {i+1} 题 (错误, 本题 {points} 分, {time_taken_str}) ---", flush=True)
+                print(f"\n--- 第 {i + 1} 题 (错误, 本题 {points} 分, {time_taken_str}) ---", flush=True)
                 print(result['question_str'], flush=True)
                 print(f"你的答案: {result['student_answer_raw']}", flush=True)
                 print(f"正确答案: {result['correct_answer_str']}", flush=True)
@@ -753,7 +707,7 @@ def start_exam_mode(seed=None):
     # --- 1. 生成考卷计划 ---
     print("正在生成考卷...", flush=True)
     simple_q_plan = [{'difficulty': 0, 'level': 'simple', 'q_type': random.choice(['tsumo', 'ron'])} for _ in range(3)]
-    
+
     if random.random() < 0.5:
         # 模式一: 2个困难(自摸) + 1个魔鬼(荣和)
         hard_q_plan = [{'difficulty': 1, 'level': 'hard', 'q_type': 'tsumo'} for _ in range(2)]
@@ -773,7 +727,7 @@ def start_exam_mode(seed=None):
     exam_start_time = time.time()
 
     for i, q_info in enumerate(exam_plan):
-        print(f"\n--- 第 {i+1}/{len(exam_plan)} 题 ---", flush=True)
+        print(f"\n--- 第 {i + 1}/{len(exam_plan)} 题 ---", flush=True)
         min_or_count = q_info['difficulty']
         q_type_choice = q_info['q_type']
 
@@ -804,7 +758,7 @@ def start_exam_mode(seed=None):
         if scenario is None:
             print("无法生成或获取场景，跳过此题。", flush=True)
             continue
-        
+
         rules = scenario["rules"]
         all_pts = scenario["start_pts"] + scenario["other_players_pts"]
         tiebreaker = scenario["tiebreaker"]
@@ -826,8 +780,6 @@ def start_exam_mode(seed=None):
         print(f"庄家: 选手 {scenario['oya']} ({oya_wind})", flush=True)
         print(f"场供: {scenario['deposit'] * 1000} 点, 本场: {scenario['honba']}", flush=True)
         print("-" * 30, flush=True)
-        cheat_sheet = _get_high_fu_cheat_sheet(scenario["player_to_ask"], scenario["oya"], scenario["question_type"], rules)
-        print(cheat_sheet, flush=True)
         print("", flush=True)
 
         # --- 4. 计算正确答案 ---
@@ -845,7 +797,7 @@ def start_exam_mode(seed=None):
         ok_end, ok_continue = [], []
 
         if q_type == "tsumo":
-            question_str = f"问题: 选手 {player} ({player_wind}) 为获得前 {goal} 名，其自摸条件是什么？"
+            question_str = f"问题: 选手 {player} ({player_wind}) 为获得前 {goal} 名，其自摸条件是什么？(限 50 符及以下)"
             pts_list = oya_tsumo if player == scenario["oya"] else ko_tsumo
             ok_end, ok_continue = calculation.calculate_tsumo_conditions(
                 player, scenario["oya"], scenario["pts_in_hand"], scenario["honba"], scenario["deposit"],

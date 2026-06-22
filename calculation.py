@@ -2,7 +2,7 @@ from cond_lib import *
 
 
 def calculate_tsumo_conditions(player, oya, pts_in_hand, honba, deposit, riichi_status, all_pts, goal_placement,
-                               tiebreaker, ruleset, all_win_pts):
+                               tiebreaker, ruleset, all_win_pts, halt=False):
     """计算玩家自摸胜利的条件, 并区分终局和续行两种情况。"""
     # 分别记录两种情况下的胜利点数
     tsumo_wins_end = set()
@@ -12,7 +12,7 @@ def calculate_tsumo_conditions(player, oya, pts_in_hand, honba, deposit, riichi_
     # 遍历所有可能的自摸得分组合
     for win_pts in all_win_pts:
         pts_copy = pts_in_hand.copy()
-        # 根据是否为亲家，计算自摸后四位玩家的手牌点数变化
+        # 根据是否为亲家, 计算自摸后四位玩家的手牌点数变化
         if is_oya:
             x = win_pts
             for k in range(4):
@@ -43,7 +43,11 @@ def calculate_tsumo_conditions(player, oya, pts_in_hand, honba, deposit, riichi_
 
         # 检查玩家排名是否达到目标
         if final_rank[player] <= goal_placement:
-            # 如果达到目标，再检查对局是否继续
+            # 如果是最小值终止模式, 直接返回
+            if halt:
+                return win_pts
+            
+            # 如果达到目标, 再检查对局是否继续
             continues = check_continuation(pts_copy, ruleset, oya, oya_wins=(player == oya))
             if continues:
                 tsumo_wins_continue.add(win_pts)
@@ -51,7 +55,7 @@ def calculate_tsumo_conditions(player, oya, pts_in_hand, honba, deposit, riichi_
                 tsumo_wins_end.add(win_pts)
 
     # --- 将离散的胜利点数集合格式化为区间列表 ---
-    # 这个逻辑的作用是找到满足条件的最低分，并找出高于最低分但又不满足条件的"例外"点数
+    # 这个逻辑的作用是找到满足条件的最低分, 并找出高于最低分但又不满足条件的"例外"点数
     # 这样 format_as_intervals 就能正确地将其显示为 "≥XXXX (不含 YYYY)" 的格式
 
     # 处理终局条件
@@ -84,11 +88,13 @@ def calculate_tsumo_conditions(player, oya, pts_in_hand, honba, deposit, riichi_
     ok_tsumo_continue = [p for p in all_win_pts[all_win_pts.index(min_win_pts_continue):] if
                          p not in exception_pts_continue] if min_win_pts_continue is not None else []
 
+    if halt:
+        return "✕"
     return ok_tsumo_end, ok_tsumo_continue
 
 
 def calculate_ron_conditions(player, target_player, oya, pts_in_hand, honba, deposit, riichi_status, all_pts,
-                             goal_placement, tiebreaker, ruleset, all_win_pts):
+                             goal_placement, tiebreaker, ruleset, all_win_pts, halt=False):
     """计算玩家荣和胜利的条件, 并区分终局和续行两种情况。"""
     ron_wins_end = set()
     ron_wins_continue = set()
@@ -113,7 +119,10 @@ def calculate_ron_conditions(player, target_player, oya, pts_in_hand, honba, dep
 
         # 检查玩家排名是否达到目标
         if final_rank[player] <= goal_placement:
-            # 如果达到目标，再检查对局是否继续
+            # 如果是最小值终止模式, 直接返回
+            if halt:
+                return win_pts
+            # 如果达到目标, 再检查对局是否继续
             continues = check_continuation(pts_copy, ruleset, oya, oya_wins=(player == oya))
             if continues:
                 ron_wins_continue.add(win_pts)
@@ -151,6 +160,8 @@ def calculate_ron_conditions(player, target_player, oya, pts_in_hand, honba, dep
     ok_ron_continue = [p for p in all_win_pts[all_win_pts.index(min_win_pts_continue):] if
                        p not in exception_pts_continue] if min_win_pts_continue is not None else []
 
+    if halt:
+        return "✕"
     return ok_ron_end, ok_ron_continue
 
 

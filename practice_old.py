@@ -260,7 +260,6 @@ def generate_random_scenario(forced_q_type=None):
 
     # 将最终分数四舍五入到一位小数
     start_pts = [round(p, 1) for p in start_pts]
-    random.shuffle(start_pts)
 
     # 3. 随机生成本场、场供等参数
     oya = 3
