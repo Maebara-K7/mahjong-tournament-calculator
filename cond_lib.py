@@ -1,3 +1,6 @@
+# cond_lib.py
+# 基础库，处理点数底层逻辑
+
 import math
 from itertools import product
 
