@@ -1,3 +1,6 @@
+# calculation.py
+# 基础库，计算获胜条件
+
 from cond_lib import *
 
 
